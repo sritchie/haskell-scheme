@@ -1,3 +1,6 @@
+-- Working off of this shit:
+-- http://en.wikibooks.org/wiki/Write_Yourself_a_Scheme_in_48_Hours
+
 module Main where
 import Control.Monad
 import System.Environment
@@ -19,15 +22,26 @@ data LispVal
   | Bool Bool
     deriving Show
 
--- Working off of this shit:
--- http://en.wikibooks.org/wiki/Write_Yourself_a_Scheme_in_48_Hours
+escape :: Parser String
+escape = do
+  bs <- char '\\'
+  c  <- oneOf "\\\"rntbf"
+  return [bs,c]
 
+nonEscape :: Parser Char
+nonEscape = noneOf "\\\""
+
+-- woah, fmap return works because
+character :: Parser String
+character = fmap return nonEscape <|> escape
+
+-- Modified internal parser. This thing can handle escaped shit.
 parseString :: Parser LispVal
 parseString = do
   _ <- char '"'
-  x <- many (noneOf "\"")
+  strings <- many character
   _ <- char '"'
-  return $ String x
+  return $ String $ concat strings
 
 -- Boom! Parses atoms.
 parseAtom :: Parser LispVal
@@ -40,8 +54,22 @@ parseAtom = do
     "#f" -> Bool False
     _ -> Atom atom
 
+-- Parses a number.
 parseNumber :: Parser LispVal
-parseNumber = liftM (Number . read) $ many1 digit
+parseNumber = liftM (Number . read) (many1 digit)
+
+-- This is the same as parseNumber above, just written using do
+-- notation.
+parseNumber1 :: Parser LispVal
+parseNumber1 = do
+  numString <- many1 digit
+  let num = read numString
+  return (Number num)
+
+-- Same thing here, written using >>= to explicitly thread the
+-- argument on through.
+parseNumber2 :: Parser LispVal
+parseNumber2 = many1 digit >>= (return . Number . read)
 
 parseExpr :: Parser LispVal
 parseExpr = parseAtom
