@@ -5,10 +5,12 @@ module Main where
 import Control.Monad
 import System.Environment
 import Text.ParserCombinators.Parsec hiding (spaces)
+import Numeric (readOct, readDec, readHex, readInt)
+import Data.Char
 
 -- Parser for
 symbol :: Parser Char
-symbol = oneOf "!#$%&|*+-/:<=>?@^_~"
+symbol = oneOf "!$%&|*+-/:<=>?@^_~"
 
 spaces :: Parser ()
 spaces = skipMany1 space
@@ -19,6 +21,7 @@ data LispVal
   | DottedList [LispVal] LispVal
   | Number Integer
   | String String
+  | Char Char
   | Bool Bool
     deriving Show
 
@@ -48,15 +51,20 @@ parseAtom :: Parser LispVal
 parseAtom = do
   first <- letter <|> symbol
   rest <- many (letter <|> digit <|> symbol)
-  let atom = first:rest
-  return $ case atom of
-    "#t" -> Bool True
-    "#f" -> Bool False
-    _ -> Atom atom
+  return $ Atom (first:rest)
+
+parseBool :: Parser LispVal
+parseBool = do
+  _ <- char '#'
+  s <- oneOf "tf"
+  return $ case s of
+    't' -> Bool True
+    'f' -> Bool False
+
 
 -- Parses a number.
-parseNumber :: Parser LispVal
-parseNumber = liftM (Number . read) (many1 digit)
+parseNumber0 :: Parser LispVal
+parseNumber0 = liftM (Number . read) (many1 digit)
 
 -- This is the same as parseNumber above, just written using do
 -- notation.
@@ -71,10 +79,57 @@ parseNumber1 = do
 parseNumber2 :: Parser LispVal
 parseNumber2 = many1 digit >>= (return . Number . read)
 
+binDigit :: Parser Char
+binDigit = oneOf "01"
+
+isBinDigit :: Char -> Bool
+isBinDigit c = (c == '0' || c == '1')
+
+readBin :: ReadS Integer
+readBin = readInt 2 isBinDigit digitToInt
+
+parseDigits :: Char -> Parser String
+parseDigits b = many1 d where
+  d = case b of
+       'b' -> octDigit
+       'o' -> octDigit
+       'd' -> digit
+       'x' -> hexDigit
+
+parseHash :: Parser LispVal
+parseHash = do
+  _ <- oneOf "#"
+  base <- oneOf "bodx"
+  digits <- parseDigits base
+  let reader = case base of
+        'b' -> readBin
+        'o' -> readOct
+        'd' -> readDec
+        'x' -> readHex
+  let ((d, _):_) = reader digits
+  return (Number d)
+
+parseNormalNum :: Parser LispVal
+parseNormalNum = liftM (Number . read) (many1 digit)
+
+parseNumber :: Parser LispVal
+parseNumber = parseNormalNum <|> parseHash
+
+parseChar :: Parser LispVal
+parseChar = do
+  _ <- string "#\\"
+  xs <- string "space" <|> string "newline" <|> fmap return anyChar
+  return $ case (map toLower xs) of
+    "space" -> Char ' '
+    "newline" -> Char '\n'
+    [x] -> Char x
+
 parseExpr :: Parser LispVal
 parseExpr = parseAtom
             <|> parseString
-            <|> parseNumber
+            <|> try parseNumber
+            <|> try parseChar
+            <|> try parseBool
 
 checkParse :: Show a => Either a LispVal -> String
 checkParse p = case p of
