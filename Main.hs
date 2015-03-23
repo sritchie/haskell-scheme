@@ -2,19 +2,24 @@
 -- http://en.wikibooks.org/wiki/Write_Yourself_a_Scheme_in_48_Hours
 
 module Main where
+import Control.Applicative ((<$>))
 import Control.Monad
 import System.Environment
 import Text.ParserCombinators.Parsec hiding (spaces)
 import Numeric (readOct, readDec, readHex, readInt)
 import Data.Char
 
--- Parser for
+-- We'l start with the basic parsers. Symbol and a whitespace
+-- clone. The `spaces` function is probably present already as lexeme
+-- or something like that.
 symbol :: Parser Char
 symbol = oneOf "!$%&|*+-/:<=>?@^_~"
 
 spaces :: Parser ()
 spaces = skipMany1 space
 
+-- The next parsers deal with values in the Scheme that I'm
+-- writing. Here are the data types:
 data LispVal
   = Atom String
   | List [LispVal]
@@ -25,26 +30,37 @@ data LispVal
   | Bool Bool
     deriving Show
 
+-- Characters that can be escaped in Scheme.
+escapeChars :: String
+escapeChars = "\\\"rntbf"
+
+-- This guy matches if it encounters a backslash followed by one of
+-- the approved escape characters above. Returns the escaped string.
 escape :: Parser String
 escape = do
   bs <- char '\\'
-  c  <- oneOf "\\\"rntbf"
+  c  <- oneOf escapeChars
   return [bs,c]
 
 nonEscape :: Parser Char
 nonEscape = noneOf "\\\""
 
--- woah, fmap return works because
+-- woah, fmap return works because a string is a sequence of
+-- characters. nonEscape is a character parser, but return pulls the
+-- character up into the list Monad.
 character :: Parser String
 character = fmap return nonEscape <|> escape
 
+bracketed :: Char -> Parser a -> Char -> Parser a
+bracketed before p after = do
+  _ <- char before
+  matches <- p
+  _ <- char after
+  return matches
+
 -- Modified internal parser. This thing can handle escaped shit.
 parseString :: Parser LispVal
-parseString = do
-  _ <- char '"'
-  strings <- many character
-  _ <- char '"'
-  return $ String $ concat strings
+parseString = (String . concat) <$> bracketed '"' (many character) '"'
 
 -- Boom! Parses atoms.
 parseAtom :: Parser LispVal
@@ -60,7 +76,6 @@ parseBool = do
   return $ case s of
     't' -> Bool True
     'f' -> Bool False
-
 
 -- Parses a number.
 parseNumber0 :: Parser LispVal
@@ -83,7 +98,7 @@ binDigit :: Parser Char
 binDigit = oneOf "01"
 
 isBinDigit :: Char -> Bool
-isBinDigit c = (c == '0' || c == '1')
+isBinDigit c = c == '0' || c == '1'
 
 readBin :: ReadS Integer
 readBin = readInt 2 isBinDigit digitToInt
