@@ -25,6 +25,7 @@ data LispVal
   | List [LispVal]
   | DottedList [LispVal] LispVal
   | Number Integer
+  | Float Float
   | String String
   | Char Char
   | Bool Bool
@@ -51,6 +52,9 @@ nonEscape = noneOf "\\\""
 character :: Parser String
 character = fmap return nonEscape <|> escape
 
+
+-- This function parses the stream bracketed by the supplied input and
+-- output characters.
 bracketed :: Char -> Parser a -> Char -> Parser a
 bracketed before p after = do
   _ <- char before
@@ -127,6 +131,8 @@ parseHash = do
 parseNormalNum :: Parser LispVal
 parseNormalNum = liftM (Number . read) (many1 digit)
 
+-- This is a little busted, since it'll handle stuff like #b12. It
+-- should verify that a space is the next character, then put it back.
 parseNumber :: Parser LispVal
 parseNumber = parseNormalNum <|> parseHash
 
@@ -134,10 +140,26 @@ parseChar :: Parser LispVal
 parseChar = do
   _ <- string "#\\"
   xs <- string "space" <|> string "newline" <|> fmap return anyChar
-  return $ case (map toLower xs) of
+  return $ case map toLower xs of
     "space" -> Char ' '
     "newline" -> Char '\n'
     [x] -> Char x
+
+-- LIST TIME!
+parseList :: Parser LispVal
+parseList = liftM List $ parseExpr `sepBy` spaces
+
+parseDottedList :: Parser LispVal
+parseDottedList = do
+  x <- endBy parseExpr spaces
+  xs <- char '.' >> spaces >> parseExpr
+  return $ DottedList x xs
+
+
+parseQuoted :: Parser LispVal
+parseQuoted = do
+  x <- char '\'' >> parseExpr
+  return $ List [Atom "quote", x]
 
 parseExpr :: Parser LispVal
 parseExpr = parseAtom
@@ -145,6 +167,8 @@ parseExpr = parseAtom
             <|> try parseNumber
             <|> try parseChar
             <|> try parseBool
+            <|> parseQuoted
+            <|> bracketed '(' (try parseList <|> parseDottedList) ')'
 
 checkParse :: Show a => Either a LispVal -> String
 checkParse p = case p of
@@ -154,7 +178,21 @@ checkParse p = case p of
 readExpr :: String -> String
 readExpr = checkParse . parse parseExpr "lisp"
 
+-- Evaluation
+
+showVal :: LispVal -> String
+showVal (String contents) = "\"" ++ contents ++ "\""
+showVal (Atom name) = name
+showVal (Number contents) = show contents
+showVal (Float contents) = show contents
+showVal (Bool True) = "#t"
+showVal (Bool False) = "#f"
+showVal (Char c) = "#\\" ++ [c]
+showVal (List xs) = "(" ++ unwords (map showVal xs) ++ ")"
+
 main :: IO ()
 main = do
   args <- getArgs
   putStrLn $ readExpr $ head args
+
+-- TODO: Handle floats. Handle exactness. Handle full numeric tower.
